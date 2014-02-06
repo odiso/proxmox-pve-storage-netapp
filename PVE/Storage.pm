@@ -22,6 +22,7 @@ use PVE::Storage::Plugin;
 use PVE::Storage::DirPlugin;
 use PVE::Storage::LVMPlugin;
 use PVE::Storage::NFSPlugin;
+use PVE::Storage::NetappPNFSPlugin;
 use PVE::Storage::ISCSIPlugin;
 use PVE::Storage::RBDPlugin;
 use PVE::Storage::SheepdogPlugin;
@@ -34,6 +35,7 @@ use PVE::Storage::ZFSPlugin;
 PVE::Storage::DirPlugin->register();
 PVE::Storage::LVMPlugin->register();
 PVE::Storage::NFSPlugin->register();
+PVE::Storage::NetappPNFSPlugin->register();
 PVE::Storage::ISCSIPlugin->register();
 PVE::Storage::RBDPlugin->register();
 PVE::Storage::SheepdogPlugin->register();
@@ -41,6 +43,7 @@ PVE::Storage::ISCSIDirectPlugin->register();
 PVE::Storage::GlusterfsPlugin->register();
 PVE::Storage::ZFSPoolPlugin->register();
 PVE::Storage::ZFSPlugin->register();
+
 PVE::Storage::Plugin->init();
 
 my $UDEVADM = '/sbin/udevadm';
