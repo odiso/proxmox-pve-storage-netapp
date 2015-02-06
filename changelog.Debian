@@ -1,0 +1,524 @@
+libpve-storage-perl (3.0-28) unstable; urgency=low
+
+  * ZFSPoolPlugin: use 'udevadm settle' to wait until devices are created. 
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 30 Jan 2015 06:27:06 +0100
+
+libpve-storage-perl (3.0-27) unstable; urgency=low
+
+  * new ZFSPoolPlugin to access local zfs storage
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 23 Jan 2015 13:01:51 +0100
+
+libpve-storage-perl (3.0-26) unstable; urgency=low
+
+  * rbd, zfs, sheepdog: bugfix : fix alloc_image if name is specified
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 21 Nov 2014 08:03:43 +0100
+
+libpve-storage-perl (3.0-25) unstable; urgency=low
+
+  * ZFS plugin: fix modification of read only value
+
+ -- Proxmox Support Team <support@proxmox.com>  Sat, 25 Oct 2014 09:47:14 +0200
+
+libpve-storage-perl (3.0-24) unstable; urgency=low
+
+  * glusterfs: add transport option for glusterfs storage
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 17 Oct 2014 09:30:29 +0200
+
+libpve-storage-perl (3.0-23) unstable; urgency=low
+
+  * glusterfs: allow to upload iso images  
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 10 Sep 2014 14:18:18 +0200
+
+libpve-storage-perl (3.0-22) unstable; urgency=low
+
+  * glusterfs: new option server2 to specify backup volfile server
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 27 Aug 2014 11:31:28 +0200
+
+libpve-storage-perl (3.0-21) unstable; urgency=low
+
+  * enable linked clones from snapshots (ceph)
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 17 Jul 2014 08:05:51 +0200
+
+libpve-storage-perl (3.0-20) unstable; urgency=low
+
+  * ZFS plugin improvements (added 'nowritecache' and 'sparse' options)
+  
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 25 Jun 2014 09:16:57 +0200
+
+libpve-storage-perl (3.0-19) unstable; urgency=low
+
+  * glusterfs : create volume through gluster block driver
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 16 Jan 2014 09:38:35 +0100
+
+libpve-storage-perl (3.0-18) unstable; urgency=low
+
+  * ZFS plugin: add support for istgt
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 18 Oct 2013 09:36:13 +0200
+
+libpve-storage-perl (3.0-17) unstable; urgency=low
+
+  * ZFS plugin: Fixes bug in calculating pool size
+  
+  * remove nexenta plugin (use ZFS plugin istead)
+  
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 14 Oct 2013 07:39:33 +0200
+
+libpve-storage-perl (3.0-16) unstable; urgency=low
+
+  * cleanup ZFS Storage Plugin
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 03 Oct 2013 07:32:38 +0200
+
+libpve-storage-perl (3.0-15) unstable; urgency=low
+
+  * Added support for ZFS Storage Plugin (solaris, omnios)
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 02 Oct 2013 06:55:57 +0200
+
+libpve-storage-perl (3.0-14) unstable; urgency=low
+
+  * storage library: add new helper parse_volname()
+
+  * storage library:  add new helper abs_filesystem_path()
+  
+  * use warnings instead of global -w flag
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 01 Oct 2013 11:28:40 +0200
+
+libpve-storage-perl (3.0-13) unstable; urgency=low
+
+  * bug fix: use filesysetm_path for LVM/iSCSI storage
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 19 Sep 2013 06:44:21 +0200
+
+libpve-storage-perl (3.0-12) unstable; urgency=low
+
+  * glusterfs: relly delete volumes when requested
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 17 Sep 2013 09:09:27 +0200
+
+libpve-storage-perl (3.0-11) unstable; urgency=low
+
+  * API fix: auto-detect format for files with vmdk extension
+
+  * API fix: return error if volume does not exists      
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 04 Sep 2013 11:16:10 +0200
+
+libpve-storage-perl (3.0-10) unstable; urgency=low
+
+  * add Glusterfs Plugin
+  
+  * API: add scan method for glusterfs
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 13 Aug 2013 06:45:27 +0200
+
+libpve-storage-perl (3.0-9) unstable; urgency=low
+
+  * sheepdog: fixes for storeid != 'sheepdog'
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 24 Jun 2013 10:08:43 +0200
+
+libpve-storage-perl (3.0-8) unstable; urgency=low
+
+  * rdb: --format is deprecated, use --image-format instead
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 04 Jun 2013 13:09:49 +0200
+
+libpve-storage-perl (3.0-7) unstable; urgency=low
+
+  * be more verebose on rbd commands to get progress
+
+  * various fixes for nexenta plugin
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 31 May 2013 11:51:43 +0200
+
+libpve-storage-perl (3.0-6) unstable; urgency=low
+
+  * fix bug from previous commit (parameter 'enabled' is optional) 
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 14 May 2013 11:24:38 +0200
+
+libpve-storage-perl (3.0-5) unstable; urgency=low
+
+  * extend storage list API with useful parameters for clone
+  
+  * rbd : clone volume to same pool that base volume
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 14 May 2013 09:58:29 +0200
+
+libpve-storage-perl (3.0-4) unstable; urgency=low
+
+  * fix iscsi session scan
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 13 May 2013 08:04:33 +0200
+
+libpve-storage-perl (3.0-3) unstable; urgency=low
+
+  * add snapsname parameter to path (required for qemu-img convert, for
+    rbd & sheepdog currently)
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 02 May 2013 06:36:33 +0200
+
+libpve-storage-perl (3.0-2) unstable; urgency=low
+
+  * rdb related fixes
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 24 Apr 2013 08:01:46 +0200
+
+libpve-storage-perl (3.0-1) unstable; urgency=low
+
+  * bump versiom for wheezy release
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 15 Mar 2013 08:15:27 +0100
+
+libpve-storage-perl (2.3-6) unstable; urgency=low
+
+  * file upload: fix race condition
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 04 Mar 2013 09:00:05 +0100
+
+libpve-storage-perl (2.3-5) unstable; urgency=low
+
+  * Allow removal of backup volumes if the user has
+    Datastore.AllocateSpace privilege on the storage and VM.Backup
+    privilege on the VM
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 01 Mar 2013 06:03:24 +0100
+
+libpve-storage-perl (2.3-4) unstable; urgency=low
+
+  * rbd: rework pool - username - auth_supported options
+  
+  * API: fix access rights: use $rpcenv->check_volume_access()
+  
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 28 Feb 2013 06:41:58 +0100
+
+libpve-storage-perl (2.3-3) unstable; urgency=low
+
+  * add create_base/clone functionality
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 14 Feb 2013 11:12:39 +0100
+
+libpve-storage-perl (2.3-2) unstable; urgency=low
+
+  * updates for new stable ceph release (0.56)
+  
+  * depend on libfile-chdir-perl
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 03 Jan 2013 11:46:07 +0100
+
+libpve-storage-perl (2.3-1) unstable; urgency=low
+
+  * also list vma backup archives
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 13 Dec 2012 07:33:22 +0100
+
+libpve-storage-perl (2.0-36) unstable; urgency=low
+
+  * remove timeouts from 'qemu-img snapshot' commands.
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 02 Nov 2012 08:52:23 +0100
+
+libpve-storage-perl (2.0-35) unstable; urgency=low
+
+  * remove hardcoded blowfish cipher
+  
+  * purge snapshots before delete volume
+  
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 31 Oct 2012 14:07:52 +0100
+
+libpve-storage-perl (2.0-34) unstable; urgency=low
+
+  * rbd: add storage space stats, get volume size for volumes list
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 22 Oct 2012 12:30:05 +0200
+
+libpve-storage-perl (2.0-33) unstable; urgency=low
+
+  * create 'dump' directory if storage contains containers
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 02 Oct 2012 13:36:35 +0200
+
+libpve-storage-perl (2.0-32) unstable; urgency=low
+
+  * qcow2 : preallocate metadatas at file creation
+  
+  * nexenta: implement storage status, several fixes
+
+  * add snapshot support
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 25 Sep 2012 06:02:35 +0200
+
+libpve-storage-perl (2.0-31) unstable; urgency=low
+
+  * fixes for nexenta, sheepdog and rbd
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 24 Aug 2012 08:20:42 +0200
+
+libpve-storage-perl (2.0-30) unstable; urgency=low
+
+  * add volume_resize functions
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 14 Aug 2012 12:40:07 +0200
+
+libpve-storage-perl (2.0-29) unstable; urgency=low
+
+  * improve tests for NFS server status
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 01 Aug 2012 08:49:43 +0200
+
+libpve-storage-perl (2.0-28) unstable; urgency=low
+
+  * add volume_size_info()
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 27 Jul 2012 10:46:39 +0200
+
+libpve-storage-perl (2.0-27) unstable; urgency=low
+
+  * fix lvmscan
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 25 Jul 2012 15:49:59 +0200
+
+libpve-storage-perl (2.0-26) unstable; urgency=low
+
+  * better timeout handling for nfs/iscsi
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 19 Jul 2012 11:06:57 +0200
+
+libpve-storage-perl (2.0-25) unstable; urgency=low
+
+  * rbd: re-add hack for empty pool
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 18 Jul 2012 14:03:14 +0200
+
+libpve-storage-perl (2.0-24) unstable; urgency=low
+
+  * sheepdog: fix path() method, else kvm complains.
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 17 Jul 2012 15:12:34 +0200
+
+libpve-storage-perl (2.0-23) unstable; urgency=low
+
+  * cleanup rbd driver
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 17 Jul 2012 13:26:27 +0200
+
+libpve-storage-perl (2.0-22) unstable; urgency=low
+
+  * include iscsidirect and nexenta plugin (experimental)
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 17 Jul 2012 11:56:51 +0200
+
+libpve-storage-perl (2.0-21) unstable; urgency=low
+
+  * include sheepdog plugin
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 16 Jul 2012 07:16:24 +0200
+
+libpve-storage-perl (2.0-20) unstable; urgency=low
+
+  * include rbd plugin
+  
+  * fix offline migration bug
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 16 Jul 2012 06:44:54 +0200
+
+libpve-storage-perl (2.0-19) unstable; urgency=low
+
+  * cleanup: new plugin architecture
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 23 May 2012 08:02:50 +0200
+
+libpve-storage-perl (2.0-18) unstable; urgency=low
+
+  * fix bug #171: fix path_to_volume_id for unmounted NFS
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 18 Apr 2012 12:34:11 +0200
+
+libpve-storage-perl (2.0-17) unstable; urgency=low
+
+  * fix bug #148: set maxfiles for default local storage
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 05 Apr 2012 14:39:44 +0200
+
+libpve-storage-perl (2.0-16) unstable; urgency=low
+
+  * use dir_glob_* from PVE::Tools
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 28 Mar 2012 08:00:31 +0200
+
+libpve-storage-perl (2.0-15) unstable; urgency=low
+
+  * allow to set option 'maxfiles' (we will use this for vzdump)
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 21 Mar 2012 07:16:17 +0100
+
+libpve-storage-perl (2.0-14) unstable; urgency=low
+
+  * use Digest::SHA instead of Digest::SHA1
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 20 Mar 2012 11:27:24 +0100
+
+libpve-storage-perl (2.0-13) unstable; urgency=low
+
+  * new lvm option 'saferemove' to zero-out data when removing LVs
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 09 Mar 2012 09:37:02 +0100
+
+libpve-storage-perl (2.0-12) unstable; urgency=low
+
+  * fix permission checks (delete volume requires Datastore.Allocate)
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 22 Feb 2012 12:08:16 +0100
+
+libpve-storage-perl (2.0-11) unstable; urgency=low
+
+  * only list iscsi when enabled (content == images)
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 15 Feb 2012 09:33:01 +0100
+
+libpve-storage-perl (2.0-10) unstable; urgency=low
+
+  * also list tar.gz and tar.lzo backup files
+
+  * fix upload permissions. Only allow iso/tmpl upload
+
+  * parse backup files and return owner vmid
+
+  * add permission checks
+  
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 09 Feb 2012 14:08:49 +0100
+
+libpve-storage-perl (2.0-9) unstable; urgency=low
+
+  * use -e (instead of -f) to test if volume exists
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 02 Dec 2011 10:31:01 +0100
+
+libpve-storage-perl (2.0-8) unstable; urgency=low
+
+  * fix iscsi size bug
+  
+  * improve error messages
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 29 Nov 2011 08:05:23 +0100
+
+libpve-storage-perl (2.0-7) unstable; urgency=low
+
+  * improve error messages
+  
+  * do not activate LVM volumes with 'vgchange -aly'
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 25 Nov 2011 07:25:58 +0100
+
+libpve-storage-perl (2.0-6) unstable; urgency=low
+
+  * improved container support
+  
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 14 Nov 2011 07:10:45 +0100
+
+libpve-storage-perl (2.0-5) unstable; urgency=low
+
+  * allow container rootdir on NFS
+
+  * implement file upload API
+
+  * allow multiple content types
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 09 Nov 2011 11:32:14 +0100
+
+libpve-storage-perl (2.0-4) unstable; urgency=low
+
+  * return numeric values for channel/ID/LUN
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 05 Aug 2011 08:46:58 +0200
+
+libpve-storage-perl (2.0-3) unstable; urgency=low
+
+  * implemented node restrictions (storage can be restricted to specific
+    nodes - i.e. DRBD)
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 29 Jul 2011 08:55:11 +0200
+
+libpve-storage-perl (2.0-2) unstable; urgency=low
+
+  * backport fixes (multipath, cache) from stable
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 25 Jul 2011 07:02:06 +0200
+
+libpve-storage-perl (2.0-1) unstable; urgency=low
+
+  * change copyright to AGPL
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 19 Aug 2010 10:15:46 +0200
+
+libpve-storage-perl (1.0-10) unstable; urgency=low
+
+  * fix used space compute
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 11 Feb 2010 10:48:58 +0100
+
+libpve-storage-perl (1.0-9) unstable; urgency=low
+
+  * also query used space as suggested by Slavio
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 04 Feb 2010 08:57:02 +0100
+
+libpve-storage-perl (1.0-8) unstable; urgency=low
+
+  * also list vmdk files
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 25 Jan 2010 11:52:43 +0100
+
+libpve-storage-perl (1.0-7) unstable; urgency=low
+
+  * fix iscsi device detection on kernel 2.6.32
+
+ -- Proxmox Support Team <support@proxmox.com>  Mon, 18 Jan 2010 13:37:24 +0100
+
+libpve-storage-perl (1.0-6) unstable; urgency=low
+
+  * fix bug in parse_volume_id (ignore case)
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 29 Oct 2009 09:22:37 +0100
+
+libpve-storage-perl (1.0-5) unstable; urgency=low
+
+  * fix bug in parse_volume_id
+
+ -- Proxmox Support Team <support@proxmox.com>  Tue, 27 Oct 2009 10:45:49 +0100
+
+libpve-storage-perl (1.0-4) unstable; urgency=low
+
+  * new functions to list backup files
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 08 Oct 2009 13:34:45 +0200
+
+libpve-storage-perl (1.0-3) unstable; urgency=low
+
+  * new install/delete template functions
+
+ -- Proxmox Support Team <support@proxmox.com>  Wed, 07 Oct 2009 08:29:55 +0200
+
+libpve-storage-perl (1.0-2) unstable; urgency=low
+
+  * do not remove storage which is used as base for other storage.
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 18 Sep 2009 08:05:32 +0200
+
+libpve-storage-perl (1.0-1) unstable; urgency=low
+
+  * initial package
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 20 Mar 2009 11:13:19 +0100
+
