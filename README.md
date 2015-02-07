@@ -1,6 +1,11 @@
 # proxmox-pve-storage-netapp
 proxmox netapp c-mode plugin
 
+description
+-----------
+This module do the integration of netapp san array into proxmox.
+Template,clones,snapshots, snapshots rollback are done on the netapp array
+
 installation
 ------------
 download libpve-storage-perl_XXX_all.deb in releases,
@@ -9,6 +14,10 @@ and install it on your proxmox host with
 dpkg -i libpve-storage-perl_XXX_all.deb
 
 
+Netapp requirement
+------------------
+You need to use Cluster Mode
+You need to have flexvol license, and snaprestore license
 
 proxmox storage config
 ----------------------
