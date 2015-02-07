@@ -10,12 +10,12 @@ proxmox storage config
     netapp: mynetappstorage
             path /mnt/pve/mymountpoint
             server x.x.x.x (ip of your controller nfs)
+            options rw,noatime,nodiratime,noacl,vers=4,rsize=65536,wsize=65536,hard,proto=tcp,timeo=600
             vserver myvservername
             aggregate myaggregatename
             adminserver x.x.x.x (cluster vip admin ip)
             login youradminlogin
             password yourpassword
-            options rw,noatime,nodiratime,noacl,vers=4,rsize=65536,wsize=65536,hard,proto=tcp,timeo=600
             content images
             maxfiles 1
 
