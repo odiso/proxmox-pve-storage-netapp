@@ -270,9 +270,11 @@ sub alloc_image {
     die "illegal name '$name' - sould be 'vm-$vmid-*'\n"
     if $name && $name !~ m/^vm-$vmid-/;
 
-    my $volname = $class->zfs_find_free_diskname($storeid, $scfg, $vmid) if !$name;
+    my $volname = $name;
+
+    $volname = $class->zfs_find_free_diskname($storeid, $scfg, $vmid) if !$volname;
     
-    $class->zfs_create_zvol($scfg, $name, $size);
+    $class->zfs_create_zvol($scfg, $volname, $size);
  
     my $guid = $class->zfs_create_lu($scfg, $volname);
     $class->zfs_add_lun_mapping_entry($scfg, $volname, $guid);
@@ -299,21 +301,16 @@ sub free_image {
 
 sub volume_resize {
     my ($class, $scfg, $storeid, $volname, $size, $running) = @_;
+    
+    my $new_size = $class->SUPER::volume_resize($scfg, $storeid, $volname, $size, $running);
 
-    my $new_size = ($size/1024);
-
-    $class->zfs_request($scfg, undef, 'set', 'volsize=' . $new_size . 'k', "$scfg->{pool}/$volname");
     $class->zfs_resize_lu($scfg, $volname, $new_size);
+
+    return $new_size;
 }
 
 sub volume_snapshot_rollback {
     my ($class, $scfg, $storeid, $volname, $snap) = @_;
-
-    # abort rollback if snapshot is not the latest
-    my $recentsnap = $class->zfs_get_latest_snapshot($scfg, $volname);
-    if ($snap ne $recentsnap) {
-        die "cannot rollback, more recent snapshots exist\n";
-    }
 
     $class->zfs_delete_lu($scfg, $volname);
 
@@ -348,6 +345,11 @@ sub volume_has_feature {
     return 1 if $features->{$feature}->{$key};
 
     return undef;
+}
+
+sub activate_storage {
+    my ($class, $storeid, $scfg, $cache) = @_;
+    return 1;
 }
 
 1;

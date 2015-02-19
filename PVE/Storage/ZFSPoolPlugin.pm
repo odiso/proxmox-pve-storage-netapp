@@ -94,22 +94,20 @@ sub zfs_parse_zvol_list {
     foreach my $line (@lines) {
 	if ($line =~ /^(.+)\s+([a-zA-Z0-9\.]+|\-)\s+(.+)$/) {
 	    my $zvol = {};
+	    my $size = $2;
+	    my $origin = $3;
 	    my @parts = split /\//, $1;
 	    my $name = pop @parts;
 	    my $pool = join('/', @parts);
 
-	    if ($pool !~ /^rpool$/) {
-		next unless $name =~ m!^(\w+)-(\d+)-(\w+)-(\d+)$!;
-		$name = $pool . '/' . $name;
-	    } else {
-		next;
-	    }
+	    next unless $name =~ m!^(\w+)-(\d+)-(\w+)-(\d+)$!;
+	    $name = $pool . '/' . $name;
 
 	    $zvol->{pool} = $pool;
 	    $zvol->{name} = $name;
-	    $zvol->{size} = zfs_parse_size($2);
+	    $zvol->{size} = zfs_parse_size($size);
 	    if ($3 !~ /^-$/) {
-		$zvol->{origin} = $3;
+		$zvol->{origin} = $origin;
 	    }
 	    push @$list, $zvol;
 	}
@@ -154,7 +152,7 @@ sub zfs_request {
     my $cmd = [];
 
     if ($method eq 'zpool_list') {
-	push @$cmd = 'zpool', 'list';
+	push @$cmd, 'zpool', 'list';
     } else {
 	push @$cmd, 'zfs', $method;
     }
@@ -181,18 +179,18 @@ sub alloc_image {
     die "illegal name '$name' - sould be 'vm-$vmid-*'\n"
     if $name && $name !~ m/^vm-$vmid-/;
 
-    $name = $class->zfs_find_free_diskname($storeid, $scfg, $vmid) if !$name;
-    
-    $class->zfs_create_zvol($scfg, $name, $size);
-    run_command ("udevadm trigger --subsystem-match block");
-    run_command ("udevadm settle --timeout 5");
-    
-    for (1..10) {
-       last if -e "/dev/zvol/$scfg->{pool}/$name" ;
-       Time::HiRes::usleep(100);
-    }
+    my $volname = $name;
+ 
+    $volname = $class->zfs_find_free_diskname($storeid, $scfg, $vmid) if !$volname;
 
-    return $name;
+    $class->zfs_create_zvol($scfg, $volname, $size);
+
+    my $devname = "/dev/zvol/$scfg->{pool}/$volname";
+
+    run_command("udevadm trigger --subsystem-match block");
+    system("udevadm settle --timeout 10 --exit-if-exists=${devname}");
+
+    return $volname;
 }
 
 sub free_image {
@@ -415,17 +413,30 @@ sub volume_snapshot_delete {
 sub volume_snapshot_rollback {
     my ($class, $scfg, $storeid, $volname, $snap) = @_;
 
-    # abort rollback if snapshot is not the latest
+    zfs_request($class, $scfg, undef, 'rollback', "$scfg->{pool}/$volname\@$snap");
+}
+
+sub volume_rollback_is_possible {
+    my ($class, $scfg, $storeid, $volname, $snap) = @_; 
+    
     my $recentsnap = $class->zfs_get_latest_snapshot($scfg, $volname);
     if ($snap ne $recentsnap) {
-        die "cannot rollback, more recent snapshots exist\n";
+	die "can't rollback, more recent snapshots exist\n";
     }
 
-    zfs_request($class, $scfg, undef, 'rollback', "$scfg->{pool}/$volname\@$snap");
+    return 1; 
 }
 
 sub activate_storage {
     my ($class, $storeid, $scfg, $cache) = @_;
+
+    my @param = ('-o', 'name', '-H');
+
+    my $text = zfs_request($class, $scfg, undef, 'zpool_list', @param);
+ 
+    if ($text !~ $scfg->{pool}) {
+	run_command("zpool import -d /dev/disk/by-id/ -a");
+    }
     return 1;
 }
 
@@ -483,6 +494,16 @@ sub create_base {
     $class->volume_snapshot($scfg, $storeid, $newname, $snap, $running);
 
     return $newvolname;
+}
+
+sub volume_resize {
+    my ($class, $scfg, $storeid, $volname, $size, $running) = @_;
+
+    my $new_size = ($size/1024);
+
+    $class->zfs_request($scfg, undef, 'set', 'volsize=' . $new_size . 'k', "$scfg->{pool}/$volname");
+
+    return $new_size;
 }
 
 sub volume_has_feature {
