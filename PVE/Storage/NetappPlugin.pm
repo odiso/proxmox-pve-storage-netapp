@@ -608,6 +608,7 @@ sub alloc_image {
     print "waiting trying to mount the new volume\n";
     while (!PVE::Storage::NFSPlugin::nfs_is_mounted($server, $export, $volumedir)) {
 	eval { PVE::Storage::NFSPlugin::nfs_mount($server, $export, $volumedir, $options) };
+	eval { my @files = glob("$imagedir/*");  };
 	sleep 1;
     }
 
