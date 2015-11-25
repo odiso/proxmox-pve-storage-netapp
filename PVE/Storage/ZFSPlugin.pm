@@ -208,7 +208,10 @@ sub options {
 # Storage implementation
 
 sub path {
-    my ($class, $scfg, $volname) = @_;
+    my ($class, $scfg, $volname, $storeid, $snapname) = @_;
+
+    die "direct access to snapshots not implemented"
+	if defined($snapname);
 
     my ($vtype, $name, $vmid) = $class->parse_volname($volname);
 
@@ -272,7 +275,7 @@ sub alloc_image {
 
     my $volname = $name;
 
-    $volname = $class->zfs_find_free_diskname($storeid, $scfg, $vmid) if !$volname;
+    $volname = $class->zfs_find_free_diskname($storeid, $scfg, $vmid, $fmt) if !$volname;
     
     $class->zfs_create_zvol($scfg, $volname, $size);
  
@@ -309,12 +312,18 @@ sub volume_resize {
     return $new_size;
 }
 
+sub volume_snapshot_delete {
+    my ($class, $scfg, $storeid, $volname, $snap, $running) = @_;
+
+    $class->zfs_request($scfg, undef, 'destroy', "$scfg->{pool}/$volname\@$snap");
+}
+
 sub volume_snapshot_rollback {
     my ($class, $scfg, $storeid, $volname, $snap) = @_;
 
     $class->zfs_delete_lu($scfg, $volname);
 
-    $class->zfs_request($class, $scfg, undef, 'rollback', "$scfg->{pool}/$volname\@$snap");
+    $class->zfs_request($scfg, undef, 'rollback', "$scfg->{pool}/$volname\@$snap");
 
     $class->zfs_import_lu($scfg, $volname);
 
@@ -349,6 +358,29 @@ sub volume_has_feature {
 
 sub activate_storage {
     my ($class, $storeid, $scfg, $cache) = @_;
+
+    return 1;
+}
+
+sub deactivate_storage {
+    my ($class, $storeid, $scfg, $cache) = @_;
+
+    return 1;
+}
+
+sub activate_volume {
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
+
+    die "unable to activate snapshot from remote zfs storage" if $snapname;
+
+    return 1;
+}
+
+sub deactivate_volume {
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
+
+    die "unable to deactivate snapshot from remote zfs storage" if $snapname;
+
     return 1;
 }
 

@@ -2,6 +2,7 @@ package PVE::Storage;
 
 use strict;
 use warnings;
+use Data::Dumper;
 
 use POSIX;
 use IO::Select;
@@ -11,7 +12,7 @@ use File::Path;
 use Cwd 'abs_path';
 use Socket;
 
-use PVE::Tools qw(run_command file_read_firstline);
+use PVE::Tools qw(run_command file_read_firstline $IPV6RE);
 use PVE::Cluster qw(cfs_read_file cfs_lock_file);
 use PVE::Exception qw(raise_param_exc);
 use PVE::JSONSchema;
@@ -21,6 +22,7 @@ use PVE::RPCEnvironment;
 use PVE::Storage::Plugin;
 use PVE::Storage::DirPlugin;
 use PVE::Storage::LVMPlugin;
+use PVE::Storage::LvmThinPlugin;
 use PVE::Storage::NFSPlugin;
 use PVE::Storage::NetappPlugin;
 use PVE::Storage::ISCSIPlugin;
@@ -30,10 +32,12 @@ use PVE::Storage::ISCSIDirectPlugin;
 use PVE::Storage::GlusterfsPlugin;
 use PVE::Storage::ZFSPoolPlugin;
 use PVE::Storage::ZFSPlugin;
+use PVE::Storage::DRBDPlugin;
 
 # load and initialize all plugins
 PVE::Storage::DirPlugin->register();
 PVE::Storage::LVMPlugin->register();
+PVE::Storage::LvmThinPlugin->register();
 PVE::Storage::NFSPlugin->register();
 PVE::Storage::NetappPlugin->register();
 PVE::Storage::ISCSIPlugin->register();
@@ -43,7 +47,7 @@ PVE::Storage::ISCSIDirectPlugin->register();
 PVE::Storage::GlusterfsPlugin->register();
 PVE::Storage::ZFSPoolPlugin->register();
 PVE::Storage::ZFSPlugin->register();
-
+PVE::Storage::DRBDPlugin->register();
 PVE::Storage::Plugin->init();
 
 my $UDEVADM = '/sbin/udevadm';
@@ -149,7 +153,7 @@ sub volume_resize {
 
 sub volume_rollback_is_possible {
     my ($cfg, $volid, $snap) = @_;
-    
+
     my ($storeid, $volname) = parse_volume_id($volid, 1);
     if ($storeid) {
         my $scfg = storage_config($cfg, $storeid);
@@ -163,13 +167,13 @@ sub volume_rollback_is_possible {
 }
 
 sub volume_snapshot {
-    my ($cfg, $volid, $snap, $running) = @_;
+    my ($cfg, $volid, $snap) = @_;
 
     my ($storeid, $volname) = parse_volume_id($volid, 1);
     if ($storeid) {
         my $scfg = storage_config($cfg, $storeid);
         my $plugin = PVE::Storage::Plugin->lookup($scfg->{type});
-        return $plugin->volume_snapshot($scfg, $storeid, $volname, $snap, $running);
+        return $plugin->volume_snapshot($scfg, $storeid, $volname, $snap);
     } elsif ($volid =~ m|^(/.+)$| && -e $volid) {
         die "snapshot file/device '$volid' is not possible\n";
     } else {
@@ -290,6 +294,9 @@ sub parse_volname {
     my $scfg = storage_config($cfg, $storeid);
 
     my $plugin = PVE::Storage::Plugin->lookup($scfg->{type});
+
+    # returns ($vtype, $name, $vmid, $basename, $basevmid, $isBase, $format)
+
     return $plugin->parse_volname($volname);
 }
 
@@ -493,6 +500,37 @@ sub storage_migrate {
 	} else {
 	    die "$errstr - target type '$tcfg->{type}' not implemented\n";
 	}
+
+    } elsif ($scfg->{type} eq 'zfspool') {
+
+	if ($tcfg->{type} eq 'zfspool') {
+
+	    die "$errstr - pool on target has not same name as source!"
+		if $tcfg->{pool} ne $scfg->{pool};
+
+	    my (undef, $volname) = parse_volname($cfg, $volid);
+
+	    my $zfspath = "$scfg->{pool}\/$volname";
+
+	    my $snap = "zfs snapshot $zfspath\@__migration__";
+
+	    my $send = "zfs send -pv $zfspath\@__migration__ \| ssh root\@$target_host zfs recv $zfspath";
+
+	    my $destroy_target = "ssh root\@$target_host zfs destroy $zfspath\@__migration__";
+ 	    run_command($snap);
+	    eval{
+		run_command($send);
+	    };
+	    my $err;
+	    if ($err = $@){
+		run_command("zfs destroy $zfspath\@__migration__");
+		die $err;
+	    }
+	    run_command($destroy_target);
+
+ 	} else {
+ 	    die "$errstr - target type $tcfg->{type} is not valid\n";
+ 	}
     } else {
 	die "$errstr - source type '$scfg->{type}' not implemented\n";
     }
@@ -557,7 +595,11 @@ sub vdisk_alloc {
 
     # lock shared storage
     return $plugin->cluster_lock_storage($storeid, $scfg->{shared}, undef, sub {
-	my $volname = $plugin->alloc_image($storeid, $scfg, $vmid, $fmt, $name, $size);
+	my $old_umask = umask(umask|0037);
+	my $volname = eval { $plugin->alloc_image($storeid, $scfg, $vmid, $fmt, $name, $size) };
+	my $err = $@;
+	umask $old_umask;
+	die $err if $err;
 	return "$storeid:$volname";
     });
 }
@@ -578,7 +620,7 @@ sub vdisk_free {
     # lock shared storage
     $plugin->cluster_lock_storage($storeid, $scfg->{shared}, undef, sub {
 
-	my ($vtype, $name, $vmid, undef, undef, $isBase) =
+	my ($vtype, $name, $vmid, undef, undef, $isBase, $format) =
 	    $plugin->parse_volname($volname);
 	if ($isBase) {
 	    my $vollist = $plugin->list_images($storeid, $scfg);
@@ -598,7 +640,7 @@ sub vdisk_free {
 		}
 	    }
 	}
-	my $cleanup_worker = $plugin->free_image($storeid, $scfg, $volname, $isBase);
+	$cleanup_worker = $plugin->free_image($storeid, $scfg, $volname, $isBase, $format);
     });
 
     return if !$cleanup_worker;
@@ -653,9 +695,9 @@ sub template_list {
 		    $info = { volid => "$sid:iso/$1", format => 'iso' };
 
 		} elsif ($tt eq 'vztmpl') {
-		    next if $fn !~ m!/([^/]+\.tar\.gz)$!;
+		    next if $fn !~ m!/([^/]+\.tar\.([gx]z))$!;
 
-		    $info = { volid => "$sid:vztmpl/$1", format => 'tgz' };
+		    $info = { volid => "$sid:vztmpl/$1", format => "t$2" };
 
 		} elsif ($tt eq 'backup') {
 		    next if $fn !~ m!/([^/]+\.(tar|tar\.gz|tar\.lzo|tgz|vma|vma\.gz|vma\.lzo))$!;
@@ -716,6 +758,44 @@ sub vdisk_list {
 	my $plugin = PVE::Storage::Plugin->lookup($scfg->{type});
 	$res->{$sid} = $plugin->list_images($sid, $scfg, $vmid, $vollist, $cache);
 	@{$res->{$sid}} = sort {lc($a->{volid}) cmp lc ($b->{volid}) } @{$res->{$sid}} if $res->{$sid};
+    }
+
+    return $res;
+}
+
+sub volume_list {
+    my ($cfg, $storeid, $vmid, $content) = @_;
+
+    my @ctypes = qw(images vztmpl iso backup);
+
+    my $cts = $content ? [ $content ] : [ @ctypes ];
+
+    my $scfg = PVE::Storage::storage_config($cfg, $storeid);
+
+    my $res = [];
+    foreach my $ct (@$cts) {
+	my $data;
+	if ($ct eq 'images') {
+	    $data = vdisk_list($cfg, $storeid, $vmid);
+	} elsif ($ct eq 'iso' && !defined($vmid)) {
+	    $data = template_list($cfg, $storeid, 'iso');
+	} elsif ($ct eq 'vztmpl'&& !defined($vmid)) {
+	    $data = template_list ($cfg, $storeid, 'vztmpl');
+	} elsif ($ct eq 'backup') {
+	    $data = template_list ($cfg, $storeid, 'backup');
+	    foreach my $item (@{$data->{$storeid}}) {
+		if (defined($vmid)) {
+		    @{$data->{$storeid}} = grep { $_->{volid} =~ m/\S+-$vmid-\S+/ } @{$data->{$storeid}};
+		}
+	    }
+	}
+
+	next if !$data || !$data->{$storeid};
+
+	foreach my $item (@{$data->{$storeid}}) {
+	    $item->{content} = $ct;
+	    push @$res, $item;
+	}
     }
 
     return $res;
@@ -793,7 +873,7 @@ sub deactivate_storage {
 }
 
 sub activate_volumes {
-    my ($cfg, $vollist, $exclusive) = @_;
+    my ($cfg, $vollist, $snapname) = @_;
 
     return if !($vollist && scalar(@$vollist));
 
@@ -811,12 +891,12 @@ sub activate_volumes {
 	my ($storeid, $volname) = parse_volume_id($volid);
 	my $scfg = storage_config($cfg, $storeid);
 	my $plugin = PVE::Storage::Plugin->lookup($scfg->{type});
-	$plugin->activate_volume($storeid, $scfg, $volname, $exclusive, $cache);
+	$plugin->activate_volume($storeid, $scfg, $volname, $snapname, $cache);
     }
 }
 
 sub deactivate_volumes {
-    my ($cfg, $vollist) = @_;
+    my ($cfg, $vollist, $snapname) = @_;
 
     return if !($vollist && scalar(@$vollist));
 
@@ -830,7 +910,7 @@ sub deactivate_volumes {
 	my $plugin = PVE::Storage::Plugin->lookup($scfg->{type});
 
 	eval {
-	    $plugin->deactivate_volume($storeid, $scfg, $volname, $cache);
+	    $plugin->deactivate_volume($storeid, $scfg, $volname, $snapname, $cache);
 	};
 	if (my $err = $@) {
 	    warn $err;
@@ -848,14 +928,25 @@ sub storage_info {
     my $ids = $cfg->{ids};
 
     my $info = {};
-
+    
+    my @ctypes = PVE::Tools::split_list($content);
+    
     my $slist = [];
     foreach my $storeid (keys %$ids) {
 
-	next if $content && !$ids->{$storeid}->{content}->{$content};
-
 	next if !storage_check_enabled($cfg, $storeid, undef, 1);
 
+	if (defined($content)) {
+	    my $want_ctype = 0;
+	    foreach my $ctype (@ctypes) {
+		if ($ids->{$storeid}->{content}->{$ctype}) {
+		    $want_ctype = 1;
+		    last;
+		}
+	    }
+	    next if !$want_ctype;
+	}
+	
 	my $type = $ids->{$storeid}->{type};
 
 	$info->{$storeid} = {
@@ -900,9 +991,14 @@ sub storage_info {
 sub resolv_server {
     my ($server) = @_;
 
-    my $packed_ip = gethostbyname($server);
+    my ($packed_ip, $family);
+    eval {
+	my @res = PVE::Tools::getaddrinfo_all($server);
+	$family = $res[0]->{family};
+	$packed_ip = (PVE::Tools::unpack_sockaddr_in46($res[0]->{addr}))[2];
+    };
     if (defined $packed_ip) {
-	return inet_ntoa($packed_ip);
+	return Socket::inet_ntop($family, $packed_ip);
     }
     return undef;
 }
@@ -932,17 +1028,19 @@ sub scan_nfs {
 
 sub scan_zfs {
 
-    my $cmd = ['zpool',  'list', '-H', '-o', 'name,size,free'];
+    my $cmd = ['zfs',  'list', '-t', 'filesystem', '-H', '-o', 'name,avail,used'];
 
     my $res = [];
     run_command($cmd, outfunc => sub {
 	my $line = shift;
 
 	if ($line =~m/^(\S+)\s+(\S+)\s+(\S+)$/) {
-	    my ($pool, $size_str, $free_str) = ($1, $2, $3);
+	    my ($pool, $size_str, $used_str) = ($1, $2, $3);
 	    my $size = PVE::Storage::ZFSPoolPlugin::zfs_parse_size($size_str);
-	    my $free = PVE::Storage::ZFSPoolPlugin::zfs_parse_size($free_str);
-	    push @$res, { pool => $pool, size => $size, free => $free };
+	    my $used = PVE::Storage::ZFSPoolPlugin::zfs_parse_size($used_str);
+	    # ignore subvolumes generated by our ZFSPoolPlugin
+	    return if $pool =~ m!/subvol-\d+-[^/]+$!; 
+	    push @$res, { pool => $pool, size => $size, free => $size-$used };
 	}
     });
 
@@ -952,12 +1050,11 @@ sub scan_zfs {
 sub resolv_portal {
     my ($portal, $noerr) = @_;
 
-    if ($portal =~ m/^([^:]+)(:(\d+))?$/) {
-	my $server = $1;
-	my $port = $3;
-
+    my ($server, $port) = PVE::Tools::parse_host_and_port($portal);
+    if ($server) {
 	if (my $ip = resolv_server($server)) {
 	    $server = $ip;
+	    $server = "[$server]" if $server =~ /^$IPV6RE$/;
 	    return $port ? "$server:$port" : $server;
 	}
     }
@@ -1110,6 +1207,69 @@ sub foreach_volid {
 	   }
        }
     }
+}
+
+# bash completion helper
+
+sub complete_storage {
+    my ($cmdname, $pname, $cvalue) = @_;
+
+    my $cfg = PVE::Storage::config();
+
+    return  $cmdname eq 'add' ? [] : [ PVE::Storage::storage_ids($cfg) ];
+}
+
+sub complete_storage_enabled {
+    my ($cmdname, $pname, $cvalue) = @_;
+
+    my $res = [];
+
+    my $cfg = PVE::Storage::config();
+    foreach my $sid (keys %{$cfg->{ids}}) {
+	next if !storage_check_enabled($cfg, $sid, undef, 1);
+	push @$res, $sid;
+    }
+    return $res;
+}
+
+sub complete_content_type {
+    my ($cmdname, $pname, $cvalue) = @_;
+
+    return [qw(rootdir images vztmpl iso backup)];
+}
+
+sub complete_volume {
+    my ($cmdname, $pname, $cvalue) = @_;
+
+    my $cfg = config();
+
+    my $storage_list = complete_storage_enabled();
+
+    if ($cvalue =~ m/^([^:]+):/) {
+	$storage_list = [ $1 ];
+    } else {
+	if (scalar(@$storage_list) > 1) {
+	    # only list storage IDs to avoid large listings
+	    my $res = [];
+	    foreach my $storeid (@$storage_list) {
+		# Hack: simply return 2 artificial values, so that
+		# completions does not finish
+		push @$res, "$storeid:volname", "$storeid:...";
+	    }
+	    return $res;
+	}
+    }
+
+    my $res = [];
+    foreach my $storeid (@$storage_list) {
+	my $vollist = PVE::Storage::volume_list($cfg, $storeid);
+
+	foreach my $item (@$vollist) {
+	    push @$res, $item->{volid};
+	}
+    }
+
+    return $res;
 }
 
 1;

@@ -3,8 +3,10 @@ package PVE::Storage::NFSPlugin;
 use strict;
 use warnings;
 use IO::File;
+use Net::IP;
 use File::Path;
 use PVE::Tools qw(run_command);
+use PVE::ProcFSTools;
 use PVE::Storage::Plugin;
 use PVE::JSONSchema qw(get_standard_option);
 
@@ -12,36 +14,25 @@ use base qw(PVE::Storage::Plugin);
 
 # NFS helper functions
 
-sub read_proc_mounts {
-    
-    local $/; # enable slurp mode
-    
-    my $data = "";
-    if (my $fd = IO::File->new("/proc/mounts", "r")) {
-	$data = <$fd>;
-	close ($fd);
-    }
-
-    return $data;
-}
-
 sub nfs_is_mounted {
     my ($server, $export, $mountpoint, $mountdata) = @_;
 
+    $server = "[$server]" if Net::IP::ip_is_ipv6($server);
     my $source = "$server:$export";
 
-    $mountdata = read_proc_mounts() if !$mountdata;
-
-    if ($mountdata =~ m|^$source/?\s$mountpoint\snfs|m) {
-	return $mountpoint;
-    } 
-
+    $mountdata = PVE::ProcFSTools::parse_proc_mounts() if !$mountdata;
+    return $mountpoint if grep {
+	$_->[2] eq 'nfs' &&
+	$_->[0] eq $source &&
+	$_->[1] eq $mountpoint
+    } @$mountdata;
     return undef;
 }
 
 sub nfs_mount {
     my ($server, $export, $mountpoint, $options) = @_;
 
+    $server = "[$server]" if Net::IP::ip_is_ipv6($server);
     my $source = "$server:$export";
 
     my $cmd = ['/bin/mount', '-t', 'nfs', $source, $mountpoint];
@@ -111,7 +102,8 @@ sub check_config {
 sub status {
     my ($class, $storeid, $scfg, $cache) = @_;
 
-    $cache->{mountdata} = read_proc_mounts() if !$cache->{mountdata};
+    $cache->{mountdata} = PVE::ProcFSTools::parse_proc_mounts()
+	if !$cache->{mountdata};
 
     my $path = $scfg->{path};
     my $server = $scfg->{server};
@@ -125,7 +117,8 @@ sub status {
 sub activate_storage {
     my ($class, $storeid, $scfg, $cache) = @_;
 
-    $cache->{mountdata} = read_proc_mounts() if !$cache->{mountdata};
+    $cache->{mountdata} = PVE::ProcFSTools::parse_proc_mounts()
+	if !$cache->{mountdata};
 
     my $path = $scfg->{path};
     my $server = $scfg->{server};
@@ -150,7 +143,8 @@ sub activate_storage {
 sub deactivate_storage {
     my ($class, $storeid, $scfg, $cache) = @_;
 
-    $cache->{mountdata} = read_proc_mounts() if !$cache->{mountdata};
+    $cache->{mountdata} = PVE::ProcFSTools::parse_proc_mounts()
+	if !$cache->{mountdata};
 
     my $path = $scfg->{path};
     my $server = $scfg->{server};
@@ -167,8 +161,7 @@ sub check_connection {
 
     my $server = $scfg->{server};
 
-    # test connection to portmapper
-    my $cmd = ['/usr/bin/rpcinfo', '-p', $server];
+    my $cmd = ['/sbin/showmount', '--no-headers', '--exports', $server];
 
     eval {
 	run_command($cmd, timeout => 2, outfunc => sub {}, errfunc => sub {});

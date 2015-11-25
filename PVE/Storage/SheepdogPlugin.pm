@@ -124,7 +124,7 @@ sub parse_volname {
     my ($class, $volname) = @_;
 
     if ($volname =~ m/^((base-(\d+)-\S+)\/)?((base)?(vm)?-(\d+)-\S+)$/) {
-	return ('images', $4, $7, $2, $3, $5);
+	return ('images', $4, $7, $2, $3, $5, 'raw');
     }
 
     die "unable to parse sheepdog volume name '$volname'\n";
@@ -345,12 +345,12 @@ sub deactivate_storage {
 }
 
 sub activate_volume {
-    my ($class, $storeid, $scfg, $volname, $exclusive, $cache) = @_;
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
     return 1;
 }
 
 sub deactivate_volume {
-    my ($class, $storeid, $scfg, $volname, $exclusive, $cache) = @_;
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
     return 1;
 }
 
@@ -389,9 +389,7 @@ sub volume_resize {
 }
 
 sub volume_snapshot {
-    my ($class, $scfg, $storeid, $volname, $snap, $running) = @_;
-
-    return 1 if $running;
+    my ($class, $scfg, $storeid, $volname, $snap) = @_;
 
     my ($vtype, $name, $vmid, $basename, $basevmid, $isBase) =
 	$class->parse_volname($volname);
@@ -417,6 +415,8 @@ sub volume_snapshot_delete {
     my ($class, $scfg, $storeid, $volname, $snap, $running) = @_;
 
     return 1 if $running;
+
+    $class->deactivate_volume($storeid, $scfg, $volname, $snap, {});
 
     my ($vtype, $name, $vmid, $basename, $basevmid, $isBase) =
 	$class->parse_volname($volname);

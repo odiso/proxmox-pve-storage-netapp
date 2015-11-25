@@ -177,13 +177,6 @@ sub rbd_volume_info {
     return ($size, $parent, $format, $protected);
 }
 
-sub addslashes {
-    my $text = shift;
-    $text =~ s/;/\\;/g;
-    $text =~ s/:/\\:/g;
-    return $text;
-}
-
 # Configuration
 
 PVE::JSONSchema::register_format('pve-storage-monhost', \&parse_monhost);
@@ -204,7 +197,7 @@ sub type {
 
 sub plugindata {
     return {
-	content => [ {images => 1}, { images => 1 }],
+	content => [ {images => 1, rootdir => 1}, { images => 1 }],
     };
 }
 
@@ -226,6 +219,10 @@ sub properties {
 	    description => "Authsupported.",
 	    type => 'string',
 	},
+	krbd => {
+	    description => "Access rbd through krbd kernel module.",
+	    type => 'boolean',
+	},
     };
 }
 
@@ -237,6 +234,7 @@ sub options {
 	pool => { optional => 1 },
 	username => { optional => 1 },
 	content => { optional => 1 },
+	krbd => { optional => 1 },
     };
 }
 
@@ -246,7 +244,7 @@ sub parse_volname {
     my ($class, $volname) = @_;
 
     if ($volname =~ m/^((base-(\d+)-\S+)\/)?((base)?(vm)?-(\d+)-\S+)$/) {
-	return ('images', $4, $7, $2, $3, $5);
+	return ('images', $4, $7, $2, $3, $5, 'raw');
     }
 
     die "unable to parse rbd volume name '$volname'\n";
@@ -258,7 +256,9 @@ sub path {
     my ($vtype, $name, $vmid) = $class->parse_volname($volname);
     $name .= '@'.$snapname if $snapname;
 
-    my $monhost = addslashes($scfg->{monhost});
+    my $monhost = $scfg->{monhost};
+    $monhost =~ s/:/\\:/g;
+
     my $pool =  $scfg->{pool} ? $scfg->{pool} : 'rbd';
     my $username =  $scfg->{username} ? $scfg->{username} : 'admin';
 
@@ -270,6 +270,8 @@ sub path {
     }else{
 	$path .= ":auth_supported=none";
     }
+
+    $path = "/dev/rbd/$pool/$name" if $scfg->{krbd};
 
     return ($path, $vmid, $vtype);
 }
@@ -405,6 +407,8 @@ sub free_image {
 	}
     }
 
+    $class->deactivate_volume($storeid, $scfg, $volname);
+
     my $cmd = &$rbd_cmd($scfg, $storeid, 'snap', 'purge',  $name);
     run_rbd_command($cmd, errmsg => "rbd snap purge '$volname' error");
 
@@ -485,12 +489,39 @@ sub deactivate_storage {
 }
 
 sub activate_volume {
-    my ($class, $storeid, $scfg, $volname, $exclusive, $cache) = @_;
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
+
+    return 1 if !$scfg->{krbd};
+
+    my ($vtype, $name, $vmid) = $class->parse_volname($volname);
+    my $pool =  $scfg->{pool} ? $scfg->{pool} : 'rbd';
+
+    my $path = "/dev/rbd/$pool/$name";
+    $path .= '@'.$snapname if $snapname;
+    return if -b $path;
+
+    $name .= '@'.$snapname if $snapname;
+    my $cmd = &$rbd_cmd($scfg, $storeid, 'map', $name);
+    run_rbd_command($cmd, errmsg => "can't mount rbd volume $name");
+
     return 1;
 }
 
 sub deactivate_volume {
-    my ($class, $storeid, $scfg, $volname, $exclusive, $cache) = @_;
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
+
+    return 1 if !$scfg->{krbd};
+
+    my ($vtype, $name, $vmid) = $class->parse_volname($volname);
+    my $pool =  $scfg->{pool} ? $scfg->{pool} : 'rbd';
+
+    my $path = "/dev/rbd/$pool/$name";
+    $path .= '@'.$snapname if $snapname;
+    return if ! -b $path;
+
+    my $cmd = &$rbd_cmd($scfg, $storeid, 'unmap', $path);
+    run_rbd_command($cmd, errmsg => "can't unmount rbd volume $name");
+
     return 1;
 }
 
@@ -515,9 +546,7 @@ sub volume_resize {
 }
 
 sub volume_snapshot {
-    my ($class, $scfg, $storeid, $volname, $snap, $running) = @_;
-
-    return 1 if $running;
+    my ($class, $scfg, $storeid, $volname, $snap) = @_;
 
     my ($vtype, $name, $vmid) = $class->parse_volname($volname);
 
@@ -539,6 +568,8 @@ sub volume_snapshot_delete {
     my ($class, $scfg, $storeid, $volname, $snap, $running) = @_;
 
     return 1 if $running;
+
+    $class->deactivate_volume($storeid, $scfg, $volname, $snap, {});
 
     my ($vtype, $name, $vmid) = $class->parse_volname($volname);
 

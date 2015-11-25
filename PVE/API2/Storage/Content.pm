@@ -2,6 +2,7 @@ package PVE::API2::Storage::Content;
 
 use strict;
 use warnings;
+use Data::Dumper;
 
 use PVE::SafeSyslog;
 use PVE::Cluster qw(cfs_read_file);
@@ -13,8 +14,6 @@ use PVE::RESTHandler;
 use PVE::JSONSchema qw(get_standard_option);
 
 use base qw(PVE::RESTHandler);
-
-my @ctypes = qw(images vztmpl iso backup);
 
 __PACKAGE__->register_method ({
     name => 'index', 
@@ -30,17 +29,20 @@ __PACKAGE__->register_method ({
     	additionalProperties => 0,
 	properties => { 
 	    node => get_standard_option('pve-node'),
-	    storage => get_standard_option('pve-storage-id'),
+	    storage => get_standard_option('pve-storage-id', {
+		completion => \&PVE::Storage::complete_storage_enabled,
+            }),
 	    content => { 
 		description => "Only list content of this type.",
 		type => 'string', format => 'pve-storage-content',
 		optional => 1,
+		completion => \&PVE::Storage::complete_content_type,
 	    },
-	    vmid => get_standard_option
-		('pve-vmid', { 
-		    description => "Only list images for this VM",
-		    optional => 1,		
-		 }),
+	    vmid => get_standard_option('pve-vmid', {
+		description => "Only list images for this VM",
+		optional => 1,
+		completion => \&PVE::Cluster::complete_vmid,
+	    }),
 	},
     },
     returns => {
@@ -62,35 +64,17 @@ __PACKAGE__->register_method ({
 
 	my $authuser = $rpcenv->get_user();
 
-	my $cts = $param->{content} ? [ $param->{content} ] : [ @ctypes ];
-
 	my $storeid = $param->{storage};
 
 	my $cfg = cfs_read_file("storage.cfg");
 
-	my $scfg = PVE::Storage::storage_config($cfg, $storeid);
+	my $vollist = PVE::Storage::volume_list($cfg, $storeid, $param->{vmid}, $param->{content});
 
 	my $res = [];
-	foreach my $ct (@$cts) {
-	    my $data;
-	    if ($ct eq 'images' || defined($param->{vmid})) {
-		$data = PVE::Storage::vdisk_list ($cfg, $storeid, $param->{vmid});
-	    } elsif ($ct eq 'iso') {
-		$data = PVE::Storage::template_list ($cfg, $storeid, 'iso');
-	    } elsif ($ct eq 'vztmpl') {
-		$data = PVE::Storage::template_list ($cfg, $storeid, 'vztmpl');
-	    } elsif ($ct eq 'backup') {
-		$data = PVE::Storage::template_list ($cfg, $storeid, 'backup');
-	    }
-
-	    next if !$data || !$data->{$storeid};
-
-	    foreach my $item (@{$data->{$storeid}}) {
-		eval { $rpcenv->check_volume_access($authuser, $cfg, undef, $item->{volid}); };
-		next if $@;
-		$item->{content} = $ct;
-		push @$res, $item;
-	    }
+	foreach my $item (@$vollist) {
+	    eval { $rpcenv->check_volume_access($authuser, $cfg, undef, $item->{volid}); };
+	    next if $@;
+	    push @$res, $item;
 	}
 
 	return $res;    
@@ -110,12 +94,17 @@ __PACKAGE__->register_method ({
     	additionalProperties => 0,
 	properties => { 
 	    node => get_standard_option('pve-node'),
-	    storage => get_standard_option('pve-storage-id'),
+	    storage => get_standard_option('pve-storage-id', {
+		completion => \&PVE::Storage::complete_storage_enabled,
+	    }),
 	    filename => { 
 		description => "The name of the file to create.",
 		type => 'string',
 	    },
-	    vmid => get_standard_option('pve-vmid', { description => "Specify owner VM" } ),
+	    vmid => get_standard_option('pve-vmid', {
+		description => "Specify owner VM",
+		completion => \&PVE::Cluster::complete_vmid,
+	    }),
 	    size => {
 		description => "Size in kilobyte (1024 bytes). Optional suffixes 'M' (megabyte, 1024K) and 'G' (gigabyte, 1024M)",
 		type => 'string',
@@ -123,7 +112,7 @@ __PACKAGE__->register_method ({
 	    },
 	    'format' => {
 		type => 'string',
-		enum => ['raw', 'qcow2'],
+		enum => ['raw', 'qcow2', 'subvol'],
 		requires => 'size',
 		optional => 1,
 	    },
@@ -260,10 +249,14 @@ __PACKAGE__->register_method ({
     	additionalProperties => 0,
 	properties => { 
 	    node => get_standard_option('pve-node'),
-	    storage => get_standard_option('pve-storage-id', { optional => 1}),
+	    storage => get_standard_option('pve-storage-id', {
+                optional => 1,
+                completion => \&PVE::Storage::complete_storage,
+            }),
 	    volume => {
 		description => "Volume identifier",
-		type => 'string', 
+		type => 'string',
+		completion => \&PVE::Storage::complete_volume,
 	    },
 	},
     },

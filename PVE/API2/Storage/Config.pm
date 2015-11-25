@@ -229,7 +229,9 @@ __PACKAGE__->register_method ({
     parameters => {
     	additionalProperties => 0,
 	properties => { 
-	    storage => get_standard_option('pve-storage-id'),
+	    storage => get_standard_option('pve-storage-id', {
+                completion => \&PVE::Storage::complete_storage,
+            }),
 	},
     },
     returns => { type => 'null' },
@@ -243,6 +245,9 @@ __PACKAGE__->register_method ({
 
 		my $cfg = cfs_read_file('storage.cfg');
 
+		die "storage '$storeid' does not exist\n"
+		    if !($cfg->{ids}->{$storeid});
+
 		die "can't remove storage - storage is used as base of another storage\n"
 		    if PVE::Storage::storage_is_used($cfg, $storeid);
 
@@ -251,7 +256,9 @@ __PACKAGE__->register_method ({
 		cfs_write_file('storage.cfg', $cfg);
 
 	    }, "delete storage failed");
-  
+
+	PVE::AccessControl::remove_storage_access($storeid);
+
 	return undef;
     }});
 

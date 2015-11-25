@@ -2,6 +2,7 @@ package PVE::Storage::LVMPlugin;
 
 use strict;
 use warnings;
+use Data::Dumper;
 use IO::File;
 use PVE::Tools qw(run_command trim);
 use PVE::Storage::Plugin;
@@ -38,7 +39,7 @@ sub lvm_pv_info {
 
 	my ($pvname, $size, $vgname, $uuid) = split(':', $line);
 
-	die "found multiple pvs entries for device '$device'\n" 
+	die "found multiple pvs entries for device '$device'\n"
 	    if $pvinfo;
 
 	$pvinfo = {
@@ -58,15 +59,15 @@ sub clear_first_sector {
     if (my $fh = IO::File->new($dev, "w")) {
 	my $buf = 0 x 512;
 	syswrite $fh, $buf;
-	$fh->close();	
+	$fh->close();
     }
 }
 
 sub lvm_create_volume_group {
     my ($device, $vgname, $shared) = @_;
-    
+
     my $res = lvm_pv_info($device);
-    
+
     if ($res->{vgname}) {
 	return if $res->{vgname} eq $vgname; # already created
 	die "device '$device' is already used by volume group '$res->{vgname}'\n";
@@ -113,12 +114,12 @@ sub lvm_vgs {
     return $vgs;
 }
 
-sub lvm_lvs {
+sub lvm_list_volumes {
     my ($vgname) = @_;
 
     my $cmd = ['/sbin/lvs', '--separator', ':', '--noheadings', '--units', 'b',
 	       '--unbuffered', '--nosuffix', '--options',
-	       'vg_name,lv_name,lv_size,uuid,tags'];
+	       'vg_name,lv_name,lv_size,lv_attr,pool_lv,data_percent,metadata_percent,snap_percent,uuid,tags'];
 
     push @$cmd, $vgname if $vgname;
 
@@ -128,46 +129,31 @@ sub lvm_lvs {
 
 	$line = trim($line);
 
-	my ($vg, $name, $size, $uuid, $tags) = split(':', $line);
+	my ($vg_name, $lv_name, $lv_size, $lv_attr, $pool_lv, $data_percent, $meta_percent, $snap_percent, $uuid, $tags) = split(':', $line);
+	return if !$vg_name;
+	return if !$lv_name;
 
-	return if $name !~ m/^vm-(\d+)-/;
-	my $nid = $1;
+	my $lv_type = substr($lv_attr, 0, 1);
 
-	my $owner;
-	foreach my $tag (split (/,/, $tags)) {
-	    if ($tag =~ m/^pve-vm-(\d+)$/) {
-		$owner = $1;
-		last;
-	    }
+	my $d = {
+	    lv_size => $lv_size,
+	    lv_type => $lv_type,
+	};
+	$d->{pool_lv} = $pool_lv if $pool_lv;
+
+	if ($lv_type eq 't') {
+	    $data_percent ||= 0;
+	    $meta_percent ||= 0;
+	    $snap_percent ||= 0;
+	    $d->{used} = int(($data_percent * $lv_size)/100);
 	}
-	
-	if ($owner) {
-	    if ($owner ne $nid) {
-		warn "owner mismatch name = $name, owner = $owner\n";
-	    }
-   
-	    $lvs->{$vg}->{$name} = { format => 'raw', size => $size, 
-				     uuid => $uuid,  tags => $tags, 
-				     vmid => $owner };
-	}
+	$lvs->{$vg_name}->{$lv_name} = $d;
     });
 
     return $lvs;
 }
 
-# Configuration 
-
-PVE::JSONSchema::register_format('pve-storage-vgname', \&parse_lvm_name);
-sub parse_lvm_name {
-    my ($name, $noerr) = @_;
-
-    if ($name !~ m/^[a-z][a-z0-9\-\_\.]*[a-z0-9]$/i) {
-	return undef if $noerr;
-	die "lvm name '$name' contains illegal characters\n";
-    }
-
-    return $name;
-}
+# Configuration
 
 sub type {
     return 'lvm';
@@ -175,7 +161,7 @@ sub type {
 
 sub plugindata {
     return {
-	content => [ {images => 1}, { images => 1 }],
+	content => [ {images => 1, rootdir => 1}, { images => 1 }],
     };
 }
 
@@ -193,6 +179,10 @@ sub properties {
 	    description => "Zero-out data when removing LVs.",
 	    type => 'boolean',
 	},
+	saferemove_throughput => {
+	    description => "Wipe throughput (cstream -t parameter value).",
+	    type => 'string',
+	},
     };
 }
 
@@ -203,6 +193,7 @@ sub options {
 	shared => { optional => 1 },
 	disable => { optional => 1 },
         saferemove => { optional => 1 },
+        saferemove_throughput => { optional => 1 },
 	content => { optional => 1 },
         base => { fixed => 1, optional => 1 },
     };
@@ -213,22 +204,24 @@ sub options {
 sub parse_volname {
     my ($class, $volname) = @_;
 
-    parse_lvm_name($volname);
+    PVE::Storage::Plugin::parse_lvm_name($volname);
 
     if ($volname =~ m/^(vm-(\d+)-\S+)$/) {
-	return ('images', $1, $2);
+	return ('images', $1, $2, undef, undef, undef, 'raw');
     }
 
     die "unable to parse lvm volume name '$volname'\n";
 }
 
 sub filesystem_path {
-    my ($class, $scfg, $volname) = @_;
+    my ($class, $scfg, $volname, $snapname) = @_;
+
+    die "lvm snapshot is not implemented"if defined($snapname);
 
     my ($vtype, $name, $vmid) = $class->parse_volname($volname);
 
     my $vg = $scfg->{vgname};
-    
+
     my $path = "/dev/$vg/$name";
 
     return wantarray ? ($path, $vmid, $vtype) : $path;
@@ -246,12 +239,31 @@ sub clone_image {
     die "can't clone images in lvm storage\n";
 }
 
+sub lvm_find_free_diskname {
+    my ($lvs, $vg, $storeid, $vmid) = @_;
+
+    my $name;
+
+    for (my $i = 1; $i < 100; $i++) {
+	my $tn = "vm-$vmid-disk-$i";
+	if (!defined ($lvs->{$vg}->{$tn})) {
+	    $name = $tn;
+	    last;
+	}
+    }
+
+    die "unable to allocate an image name for ID $vmid in storage '$storeid'\n"
+	if !$name;
+
+    return $name;
+}
+
 sub alloc_image {
     my ($class, $storeid, $scfg, $vmid, $fmt, $name, $size) = @_;
 
     die "unsupported format '$fmt'" if $fmt ne 'raw';
 
-    die "illegal name '$name' - sould be 'vm-$vmid-*'\n" 
+    die "illegal name '$name' - sould be 'vm-$vmid-*'\n"
 	if  $name && $name !~ m/^vm-$vmid-/;
 
     my $vgs = lvm_vgs();
@@ -264,19 +276,7 @@ sub alloc_image {
 
     die "not enough free space ($free < $size)\n" if $free < $size;
 
-    if (!$name) {
-	my $lvs = lvm_lvs($vg);
-
-	for (my $i = 1; $i < 100; $i++) {
-	    my $tn = "vm-$vmid-disk-$i";
-	    if (!defined ($lvs->{$vg}->{$tn})) {
-		$name = $tn;
-		last;
-	    }
-	}
-    }
-
-    die "unable to allocate an image name for VM $vmid in storage '$storeid'\n"
+    $name = lvm_find_free_diskname(lvm_list_volumes($vg), $vg, $storeid, $vmid)
 	if !$name;
 
     my $cmd = ['/sbin/lvcreate', '-aly', '--addtag', "pve-vm-$vmid", '--size', "${size}k", '--name', $name, $vg];
@@ -290,31 +290,49 @@ sub free_image {
     my ($class, $storeid, $scfg, $volname, $isBase) = @_;
 
     my $vg = $scfg->{vgname};
-    
+
     # we need to zero out LVM data for security reasons
     # and to allow thin provisioning
 
     my $zero_out_worker = sub {
-	print "zero-out data on image $volname\n";
-	my $cmd = ['dd', "if=/dev/zero", "of=/dev/$vg/del-$volname", "bs=1M"];
-	eval { run_command($cmd, errmsg => "zero out failed"); };
+	print "zero-out data on image $volname (/dev/$vg/del-$volname)\n";
+
+	# wipe throughput up to 10MB/s by default; may be overwritten with saferemove_throughput
+	my $throughput = '-10485760';
+	if ($scfg->{saferemove_throughput}) {
+		$throughput = $scfg->{saferemove_throughput};
+	}
+
+	my $cmd = [
+		'/usr/bin/cstream',
+		'-i', '/dev/zero',
+		'-o', "/dev/$vg/del-$volname",
+		'-T', '10',
+		'-v', '1',
+		'-b', '1048576',
+		'-t', "$throughput"
+	];
+	eval { run_command($cmd, errmsg => "zero out finished (note: 'No space left on device' is ok here)"); };
 	warn $@ if $@;
 
 	$class->cluster_lock_storage($storeid, $scfg->{shared}, undef, sub {
 	    my $cmd = ['/sbin/lvremove', '-f', "$vg/del-$volname"];
 	    run_command($cmd, errmsg => "lvremove '$vg/del-$volname' error");
 	});
-	print "successfully removed volume $volname\n";
+	print "successfully removed volume $volname ($vg/del-$volname)\n";
     };
+
+    my $cmd = ['/sbin/lvchange', '-aly', "$vg/$volname"];
+    run_command($cmd, errmsg => "can't activate LV '$vg/$volname' to zero-out its data");
 
     if ($scfg->{saferemove}) {
 	# avoid long running task, so we only rename here
-	my $cmd = ['/sbin/lvrename', $vg, $volname, "del-$volname"];
+	$cmd = ['/sbin/lvrename', $vg, $volname, "del-$volname"];
 	run_command($cmd, errmsg => "lvrename '$vg/$volname' error");
 	return $zero_out_worker;
     } else {
 	my $tmpvg = $scfg->{vgname};
-	my $cmd = ['/sbin/lvremove', '-f', "$tmpvg/$volname"];
+	$cmd = ['/sbin/lvremove', '-f', "$tmpvg/$volname"];
 	run_command($cmd, errmsg => "lvremove '$tmpvg/$volname' error");
     }
 
@@ -326,15 +344,20 @@ sub list_images {
 
     my $vgname = $scfg->{vgname};
 
-    $cache->{lvs} = lvm_lvs() if !$cache->{lvs};
+    $cache->{lvs} = lvm_list_volumes() if !$cache->{lvs};
 
     my $res = [];
-    
+
     if (my $dat = $cache->{lvs}->{$vgname}) {
 
 	foreach my $volname (keys %$dat) {
 
-	    my $owner = $dat->{$volname}->{vmid};
+	    next if $volname !~ m/^vm-(\d+)-/;
+	    my $owner = $1;
+
+	    my $info = $dat->{$volname};
+
+	    next if $info->{lv_type} ne '-';
 
 	    my $volid = "$storeid:$volname";
 
@@ -342,13 +365,12 @@ sub list_images {
 		my $found = grep { $_ eq $volid } @$vollist;
 		next if !$found;
 	    } else {
-		next if defined ($vmid) && ($owner ne $vmid);
+		next if defined($vmid) && ($owner ne $vmid);
 	    }
 
-	    my $info = $dat->{$volname};
-	    $info->{volid} = $volid;
-
-	    push @$res, $info;
+	    push @$res, {
+		volid => $volid, format => 'raw', size => $info->{lv_size}, vmid => $owner,
+	    };
 	}
     }
 
@@ -362,12 +384,8 @@ sub status {
 
     my $vgname = $scfg->{vgname};
 
-    my $total = 0;
-    my $free = 0;
-    my $used = 0;
-
-    if (my $info = $cache->{vgs}->{$vgname}) {
-	return ($info->{size}, $info->{free}, $total - $free, 1);
+     if (my $info = $cache->{vgs}->{$vgname}) {
+	return ($info->{size}, $info->{free}, $info->{size} - $info->{free}, 1);
     }
 
     return undef;
@@ -380,7 +398,7 @@ sub activate_storage {
 
     # In LVM2, vgscans take place automatically;
     # this is just to be sure
-    if ($cache->{vgs} && !$cache->{vgscaned} && 
+    if ($cache->{vgs} && !$cache->{vgscaned} &&
 	!$cache->{vgs}->{$scfg->{vgname}}) {
 	$cache->{vgscaned} = 1;
 	my $cmd = ['/sbin/vgscan', '--ignorelockingfailure', '--mknodes'];
@@ -400,20 +418,20 @@ sub deactivate_storage {
 }
 
 sub activate_volume {
-    my ($class, $storeid, $scfg, $volname, $exclusive, $cache) = @_;
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
+    #fix me lvmchange is not provided on
+    my $path = $class->path($scfg, $volname, $snapname);
 
-    my $path = $class->path($scfg, $volname);
-
-    my $lvm_activate_mode = $exclusive ? 'ey' : 'ly';
+    my $lvm_activate_mode = 'ey';
 
     my $cmd = ['/sbin/lvchange', "-a$lvm_activate_mode", $path];
     run_command($cmd, errmsg => "can't activate LV '$path'");
 }
 
 sub deactivate_volume {
-    my ($class, $storeid, $scfg, $volname, $cache) = @_;
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
 
-    my $path = $class->path($scfg, $volname);
+    my $path = $class->path($scfg, $volname, $snapname);
     return if ! -b $path;
 
     my $cmd = ['/sbin/lvchange', '-aln', $path];
@@ -433,7 +451,7 @@ sub volume_resize {
 }
 
 sub volume_snapshot {
-    my ($class, $scfg, $storeid, $volname, $snap, $running) = @_;
+    my ($class, $scfg, $storeid, $volname, $snap) = @_;
 
     die "lvm snapshot is not implemented";
 }

@@ -5,9 +5,10 @@ use warnings;
 use IO::File;
 use File::Path;
 use PVE::Tools qw(run_command);
+use PVE::ProcFSTools;
+use PVE::Network;
 use PVE::Storage::Plugin;
 use PVE::JSONSchema qw(get_standard_option);
-use Net::Ping;
 
 use base qw(PVE::Storage::Plugin);
 
@@ -37,10 +38,10 @@ my $get_active_server = sub {
     foreach my $server (@$serverlist) {
 	my $status = 0;
 
-	if ($server && $server ne 'localhost' && $server ne '127.0.0.1') {
+	if ($server && $server ne 'localhost' && $server ne '127.0.0.1' && $server ne '::1') {
 
-	    my $p = Net::Ping->new("tcp", 2);
-	    $status = $p->ping($server);
+	    # ping the echo port (7) without service check
+	    $status = PVE::Network::tcp_ping($server, undef, 2);
 
 	} else {
 
@@ -66,28 +67,16 @@ my $get_active_server = sub {
     return undef;
 };
 
-sub read_proc_mounts {
-
-    local $/; # enable slurp mode
-
-    my $data = "";
-    if (my $fd = IO::File->new("/proc/mounts", "r")) {
-	$data = <$fd>;
-	close ($fd);
-    }
-
-    return $data;
-}
-
 sub glusterfs_is_mounted {
     my ($volume, $mountpoint, $mountdata) = @_;
 
-    $mountdata = read_proc_mounts() if !$mountdata;
+    $mountdata = PVE::ProcFSTools::parse_proc_mounts() if !$mountdata;
 
-    if ($mountdata =~ m|^\S+:$volume/?\s$mountpoint\sfuse.glusterfs|m) {
-	return $mountpoint;
-    }
-
+    return $mountpoint if grep {
+	$_->[2] eq 'fuse.glusterfs' &&
+	$_->[0] eq $volume &&
+	$_->[1] eq $mountpoint
+    } @$mountdata;
     return undef;
 }
 
@@ -191,9 +180,15 @@ my $find_free_diskname = sub {
 };
 
 sub path {
-    my ($class, $scfg, $volname, $storeid) = @_;
+    my ($class, $scfg, $volname, $storeid, $snapname) = @_;
 
-    my ($vtype, $name, $vmid) = $class->parse_volname($volname);
+    my ($vtype, $name, $vmid, undef, undef, $isBase, $format) =
+	$class->parse_volname($volname);
+
+    # Note: qcow2/qed has internal snapshot, so path is always
+    # the same (with or without snapshot => same file).
+    die "can't snapshot this image format\n" 
+	if defined($snapname) && $format !~ m/^(qcow2|qed)$/;
 
     my $path = undef;
     if ($vtype eq 'images') {
@@ -254,7 +249,8 @@ sub alloc_image {
 sub status {
     my ($class, $storeid, $scfg, $cache) = @_;
 
-    $cache->{mountdata} = read_proc_mounts() if !$cache->{mountdata};
+    $cache->{mountdata} = PVE::ProcFSTools::parse_proc_mounts()
+	if !$cache->{mountdata};
 
     my $path = $scfg->{path};
 
@@ -268,7 +264,8 @@ sub status {
 sub activate_storage {
     my ($class, $storeid, $scfg, $cache) = @_;
 
-    $cache->{mountdata} = read_proc_mounts() if !$cache->{mountdata};
+    $cache->{mountdata} = PVE::ProcFSTools::parse_proc_mounts()
+	if !$cache->{mountdata};
 
     my $path = $scfg->{path};
     my $volume = $scfg->{volume};
@@ -291,7 +288,8 @@ sub activate_storage {
 sub deactivate_storage {
     my ($class, $storeid, $scfg, $cache) = @_;
 
-    $cache->{mountdata} = read_proc_mounts() if !$cache->{mountdata};
+    $cache->{mountdata} = PVE::ProcFSTools::parse_proc_mounts()
+	if !$cache->{mountdata};
 
     my $path = $scfg->{path};
     my $volume = $scfg->{volume};
@@ -303,13 +301,13 @@ sub deactivate_storage {
 }
 
 sub activate_volume {
-    my ($class, $storeid, $scfg, $volname, $exclusive, $cache) = @_;
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
 
     # do nothing by default
 }
 
 sub deactivate_volume {
-    my ($class, $storeid, $scfg, $volname, $cache) = @_;
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
 
     # do nothing by default
 }

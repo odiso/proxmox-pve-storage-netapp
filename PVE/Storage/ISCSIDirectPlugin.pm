@@ -77,7 +77,7 @@ sub parse_volname {
 
 
     if ($volname =~ m/^lun(\d+)$/) {
-	return ('images', $1, undef);
+	return ('images', $1, undef, undef, undef, undef, 'raw');
     }
 
     die "unable to parse iscsi volume name '$volname'\n";
@@ -85,7 +85,10 @@ sub parse_volname {
 }
 
 sub path {
-    my ($class, $scfg, $volname) = @_;
+    my ($class, $scfg, $volname, $storeid, $snapname) = @_;
+
+    die "volume snapshot is not possible on iscsi device"
+	if defined($snapname);
 
     my ($vtype, $lun, $vmid) = $class->parse_volname($volname);
 
@@ -181,12 +184,18 @@ sub deactivate_storage {
 }
 
 sub activate_volume {
-    my ($class, $storeid, $scfg, $volname, $exclusive, $cache) = @_;
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
+
+    die "volume snapshot is not possible on iscsi device" if $snapname;
+
     return 1;
 }
 
 sub deactivate_volume {
-    my ($class, $storeid, $scfg, $volname, $exclusive, $cache) = @_;
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
+
+    die "volume snapshot is not possible on iscsi device" if $snapname;
+
     return 1;
 }
 
@@ -205,7 +214,7 @@ sub volume_resize {
 }
 
 sub volume_snapshot {
-    my ($class, $scfg, $storeid, $volname, $snap, $running) = @_;
+    my ($class, $scfg, $storeid, $volname, $snap) = @_;
     die "volume snapshot is not possible on iscsi device";
 }
 

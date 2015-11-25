@@ -40,15 +40,16 @@ __PACKAGE__->register_method ({
     	additionalProperties => 0,
 	properties => {
 	    node => get_standard_option('pve-node'),
-	    storage => get_standard_option
-		('pve-storage-id', {
-		    description => "Only list status for  specified storage",
-		    optional => 1,
-		 }),
+	    storage => get_standard_option('pve-storage-id', {
+		description => "Only list status for  specified storage",
+		optional => 1,
+		completion => \&PVE::Storage::complete_storage_enabled,
+	    }),
 	    content => { 
 		description => "Only list stores which support this content type.",
-		type => 'string', format => 'pve-storage-content',
+		type => 'string', format => 'pve-storage-content-list',
 		optional => 1,
+		completion => \&PVE::Storage::complete_content_type,
 	    },
 	    enabled => {
 		description => "Only list stores which are enabled (not disabled in config).",
@@ -60,6 +61,7 @@ __PACKAGE__->register_method ({
 		description => "If target is different to 'node', we only lists shared storages which " .
 		    "content is accessible on this 'node' and the specified 'target' node.",
 		optional => 1,
+		completion => \&PVE::Cluster::get_nodelist,
 	    }),
 	},
     },
@@ -341,7 +343,7 @@ __PACKAGE__->register_method ({
 
 	chomp $filename;
 	$filename =~ s/^.*[\/\\]//;
-	$filename =~ s/\s/_/g;
+	$filename =~ s/[;:,=\s\x80-\xff]/_/g;
 
 	my $path;
 
@@ -373,7 +375,7 @@ __PACKAGE__->register_method ({
 
 	    my @ssh_options = ('-o', 'BatchMode=yes');
 
-	    my @remcmd = ('/usr/bin/ssh', @ssh_options, $remip);
+	    my @remcmd = ('/usr/bin/ssh', @ssh_options, $remip, '--');
 
 	    eval { 
 		# activate remote storage
@@ -382,14 +384,14 @@ __PACKAGE__->register_method ({
 	    };
 	    die "can't activate storage '$param->{storage}' on node '$node'\n" if $@;
 
- 	    PVE::Tools::run_command([@remcmd, '/bin/mkdir', '-p', $dirname],
+	    PVE::Tools::run_command([@remcmd, '/bin/mkdir', '-p', '--', PVE::Tools::shell_quote($dirname)],
 				    errmsg => "mkdir failed");
  
-	    $cmd = ['/usr/bin/scp', @ssh_options, $tmpfilename, "$remip:$dest"];
+	    $cmd = ['/usr/bin/scp', @ssh_options, '--', $tmpfilename, "[$remip]:" . PVE::Tools::shell_quote($dest)];
 	} else {
 	    PVE::Storage::activate_storage($cfg, $param->{storage});
 	    File::Path::make_path($dirname);
-	    $cmd = ['cp', $tmpfilename, $dest];
+	    $cmd = ['cp', '--', $tmpfilename, $dest];
 	}
 
 	my $worker = sub  {

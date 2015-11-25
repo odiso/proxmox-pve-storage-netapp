@@ -16,15 +16,18 @@ cfs_register_file ('storage.cfg',
 		   sub { __PACKAGE__->parse_config(@_); },
 		   sub { __PACKAGE__->write_config(@_); });
 
+
 my $defaultData = {
     propertyList => {
 	type => { description => "Storage type." },
-	storage => get_standard_option('pve-storage-id'),
+	storage => get_standard_option('pve-storage-id',
+	    { completion => \&PVE::Storage::complete_storage }),
 	nodes => get_standard_option('pve-node-list', { optional => 1 }),
 	content => {
-	    description => "Allowed content types.",
+	    description => "Allowed content types. Note: value 'rootdir' is used for Containers, and value 'images' for KVM-Qemu VM's.\n",
 	    type => 'string', format => 'pve-storage-content-list',
 	    optional => 1,
+	    completion => \&PVE::Storage::complete_content_type,
 	},
 	disable => {
 	    description => "Flag to disable the storage.",
@@ -105,13 +108,25 @@ PVE::JSONSchema::register_format('pve-storage-server', \&verify_server);
 sub verify_server {
     my ($server, $noerr) = @_;
 
-    # fixme: use better regex ?
-    # IP or DNS name
-    if ($server !~ m/^[[:alnum:]\-\.]+$/) {
+    if (!(PVE::JSONSchema::pve_verify_ip($server, 1) ||
+          PVE::JSONSchema::pve_verify_dns_name($server, 1)))
+    {
 	return undef if $noerr;
 	die "value does not look like a valid server name or IP address\n";
     }
     return $server;
+}
+
+PVE::JSONSchema::register_format('pve-storage-vgname', \&parse_lvm_name);
+sub parse_lvm_name {
+    my ($name, $noerr) = @_;
+
+    if ($name !~ m/^[a-z][a-z0-9\-\_\.]*[a-z0-9]$/i) {
+	return undef if $noerr;
+	die "lvm name '$name' contains illegal characters\n";
+    }
+
+    return $name;
 }
 
 # fixme: do we need this
@@ -132,7 +147,7 @@ sub verify_portal_dns {
     my ($portal, $noerr) = @_;
 
     # IP or DNS name with optional port
-    if ($portal !~ m/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[[:alnum:]\-\.]+)(:\d+)?$/) {
+    if (!PVE::Tools::parse_host_and_port($portal)) {
 	return undef if $noerr;
 	die "value does not look like a valid portal address\n";
     }
@@ -157,7 +172,7 @@ PVE::JSONSchema::register_format('pve-storage-format', \&verify_format);
 sub verify_format {
     my ($fmt, $noerr) = @_;
 
-    if ($fmt !~ m/(raw|qcow2|vmdk)/) {
+    if ($fmt !~ m/(raw|qcow2|vmdk|subvol)/) {
 	return undef if $noerr;
 	die "invalid format '$fmt'\n";
     }
@@ -279,7 +294,7 @@ sub parse_config {
     my $ids = $cfg->{ids};
 
     # make sure we have a reasonable 'local:' storage
-    # openvz expects things to be there
+    # we want 'local' to be always the same 'type' (on all cluster nodes)
     if (!$ids->{local} || $ids->{local}->{type} ne 'dir' ||
 	($ids->{local}->{path} && $ids->{local}->{path} ne '/var/lib/vz')) {
 	$ids->{local} = {
@@ -290,11 +305,6 @@ sub parse_config {
 	    content => { images => 1, rootdir => 1, vztmpl => 1, iso => 1},
 	};
     }
-
-    # we always need this for OpenVZ
-    $ids->{local}->{content}->{rootdir} = 1;
-    $ids->{local}->{content}->{vztmpl} = 1;
-    delete ($ids->{local}->{disable});
 
     # make sure we have a path
     $ids->{local}->{path} = '/var/lib/vz' if !$ids->{local}->{path};
@@ -312,7 +322,7 @@ sub parse_config {
 	    $d->{content} = $def->{content}->[1] if !$d->{content};
 	}
 
-	if ($type eq 'iscsi' || $type eq 'nfs' || $type eq 'rbd' || $type eq 'sheepdog' || $type eq 'iscsidirect' || $type eq 'glusterfs' || $type eq 'zfs' || $type eq 'netapp') {
+	if ($type eq 'iscsi' || $type eq 'nfs' || $type eq 'rbd' || $type eq 'sheepdog' || $type eq 'iscsidirect' || $type eq 'glusterfs' || $type eq 'zfs' || $type eq 'drbd' || $type eq 'netapp') {
 	    $d->{shared} = 1;
 	}
     }
@@ -342,8 +352,8 @@ sub cluster_lock_storage {
 sub parse_name_dir {
     my $name = shift;
 
-    if ($name =~ m!^((base-)?[^/\s]+\.(raw|qcow2|vmdk))$!) {
-	return ($1, $3, $2);
+    if ($name =~ m!^((base-)?[^/\s]+\.(raw|qcow2|vmdk|subvol))$!) {
+	return ($1, $3, $2); # (name, format, isBase)
     }
 
     die "unable to parse volume filename '$name'\n";
@@ -356,21 +366,21 @@ sub parse_volname {
 	my ($basedvmid, $basename) = ($1, $2);
 	parse_name_dir($basename);
 	my ($vmid, $name) = ($3, $4);
-	my (undef, undef, $isBase) = parse_name_dir($name);
-	return ('images', $name, $vmid, $basename, $basedvmid, $isBase);
+	my (undef, $format, $isBase) = parse_name_dir($name);
+	return ('images', $name, $vmid, $basename, $basedvmid, $isBase, $format);
     } elsif ($volname =~ m!^(\d+)/(\S+)$!) {
 	my ($vmid, $name) = ($1, $2);
-	my (undef, undef, $isBase) = parse_name_dir($name);
-	return ('images', $name, $vmid, undef, undef, $isBase);
+	my (undef, $format, $isBase) = parse_name_dir($name);
+	return ('images', $name, $vmid, undef, undef, $isBase, $format);
     } elsif ($volname =~ m!^iso/([^/]+\.[Ii][Ss][Oo])$!) {
 	return ('iso', $1);
-    } elsif ($volname =~ m!^vztmpl/([^/]+\.tar\.gz)$!) {
+    } elsif ($volname =~ m!^vztmpl/([^/]+\.tar\.[gx]z)$!) {
 	return ('vztmpl', $1);
     } elsif ($volname =~ m!^rootdir/(\d+)$!) {
 	return ('rootdir', $1, $1);
     } elsif ($volname =~ m!^backup/([^/]+(\.(tar|tar\.gz|tar\.lzo|tgz|vma|vma\.gz|vma\.lzo)))$!) {
 	my $fn = $1;
-	if ($fn =~ m/^vzdump-(openvz|qemu)-(\d+)-.+/) {
+	if ($fn =~ m/^vzdump-(openvz|lxc|qemu)-(\d+)-.+/) {
 	    return ('backup', $fn, $2);
 	}
 	return ('backup', $fn);
@@ -402,9 +412,15 @@ sub get_subdir {
 }
 
 sub filesystem_path {
-    my ($class, $scfg, $volname, $storeid) = @_;
+    my ($class, $scfg, $volname, $snapname) = @_;
 
-    my ($vtype, $name, $vmid) = $class->parse_volname($volname);
+    my ($vtype, $name, $vmid, undef, undef, $isBase, $format) =
+	$class->parse_volname($volname);
+
+    # Note: qcow2/qed has internal snapshot, so path is always
+    # the same (with or without snapshot => same file).
+    die "can't snapshot this image format\n"
+	if defined($snapname) && $format !~ m/^(qcow2|qed)$/;
 
     my $dir = $class->get_subdir($scfg, $vtype);
 
@@ -416,9 +432,9 @@ sub filesystem_path {
 }
 
 sub path {
-    my ($class, $scfg, $volname, $storeid) = @_;
+    my ($class, $scfg, $volname, $storeid, $snapname) = @_;
 
-    return $class->filesystem_path($scfg, $volname, $storeid);
+    return $class->filesystem_path($scfg, $volname, $snapname);
 }
 
 sub create_base {
@@ -427,7 +443,7 @@ sub create_base {
     # this only works for file based storage types
     die "storage definintion has no path\n" if !$scfg->{path};
 
-    my ($vtype, $name, $vmid, $basename, $basevmid, $isBase) =
+    my ($vtype, $name, $vmid, $basename, $basevmid, $isBase, $format) =
 	$class->parse_volname($volname);
 
     die "create_base on wrong vtype '$vtype'\n" if $vtype ne 'images';
@@ -436,8 +452,8 @@ sub create_base {
 
     my $path = $class->filesystem_path($scfg, $volname);
 
-    my ($size, $format, $used, $parent) = file_size_info($path);
-    die "file_size_info on '$volname' failed\n" if !($format && $size);
+    my ($size, undef, $used, $parent) = file_size_info($path);
+    die "file_size_info on '$volname' failed\n" if !($format && defined($size));
 
     die "volname '$volname' contains wrong information about parent\n"
 	if $basename && (!$parent || $parent ne "../$basevmid/$basename");
@@ -492,12 +508,14 @@ sub clone_image {
     # this only works for file based storage types
     die "storage definintion has no path\n" if !$scfg->{path};
 
-    my ($vtype, $basename, $basevmid, undef, undef, $isBase) =
+    my ($vtype, $basename, $basevmid, undef, undef, $isBase, $format) =
 	$class->parse_volname($volname);
 
     die "clone_image on wrong vtype '$vtype'\n" if $vtype ne 'images';
 
     die "this storage type does not support clone_image on snapshot\n" if $snap;
+
+    die "this storage type does not support clone_image on subvolumes\n" if $format eq 'subvol';
 
     die "clone_image only works on base images\n" if !$isBase;
 
@@ -549,41 +567,57 @@ sub alloc_image {
 
     die "disk image '$path' already exists\n" if -e $path;
 
-    my $cmd = ['/usr/bin/qemu-img', 'create'];
+    if ($fmt eq 'subvol') {
+	# only allow this if size = 0, so that user knows what he is doing
+	die "storage does not support subvol quotas\n" if $size != 0;
+	
+	(mkdir $path) || die "unable to create subvol '$path' - $!\n";
+    } else {
+	my $cmd = ['/usr/bin/qemu-img', 'create'];
 
-    push @$cmd, '-o', 'preallocation=metadata' if $fmt eq 'qcow2';
+	push @$cmd, '-o', 'preallocation=metadata' if $fmt eq 'qcow2';
+	
+	push @$cmd, '-f', $fmt, $path, "${size}K";
 
-    push @$cmd, '-f', $fmt, $path, "${size}K";
-
-    run_command($cmd, errmsg => "unable to create image");
-
+	run_command($cmd, errmsg => "unable to create image");
+    }
+    
     return "$vmid/$name";
 }
 
 sub free_image {
-    my ($class, $storeid, $scfg, $volname, $isBase) = @_;
+    my ($class, $storeid, $scfg, $volname, $isBase, $format) = @_;
 
     my $path = $class->filesystem_path($scfg, $volname);
 
-    if (! -f $path) {
-	warn "disk image '$path' does not exists\n";
-	return undef;
+    if ($format eq 'subvol') {
+	File::Path::remove_tree($path);
+    } else {
+    
+	if (! -f $path) {
+	    warn "disk image '$path' does not exists\n";
+	    return undef;
+	}
+
+	if ($isBase) {
+	    # try to remove immutable flag
+	    eval { run_command(['/usr/bin/chattr', '-i', $path]); };
+	    warn $@ if $@;
+	}
+
+	unlink($path) || die "unlink '$path' failed - $!\n";
     }
-
-    if ($isBase) {
-	# try to remove immutable flag
-	eval { run_command(['/usr/bin/chattr', '-i', $path]); };
-	warn $@ if $@;
-    }
-
-    unlink($path) || die "unlink '$path' failed - $!\n";
-
+    
     return undef;
 }
 
 sub file_size_info {
     my ($filename, $timeout) = @_;
 
+    if (-d $filename) {
+	return wantarray ? (0, 'subvol', 0, undef) : 1;
+    }
+    
     my $cmd = ['/usr/bin/qemu-img', 'info', $filename];
 
     my $format;
@@ -627,13 +661,15 @@ sub volume_size_info {
 sub volume_resize {
     my ($class, $scfg, $storeid, $volname, $size, $running) = @_;
 
-    die "can't resize this image format" if $volname !~ m/\.(raw|qcow2)$/;
+    die "can't resize this image format\n" if $volname !~ m/\.(raw|qcow2)$/;
 
     return 1 if $running;
 
     my $path = $class->filesystem_path($scfg, $volname);
 
-    my $cmd = ['/usr/bin/qemu-img', 'resize', $path , $size];
+    my $format = ($class->parse_volname($volname))[6];
+
+    my $cmd = ['/usr/bin/qemu-img', 'resize', '-f', $format, $path , $size];
 
     run_command($cmd, timeout => 10);
 
@@ -641,11 +677,9 @@ sub volume_resize {
 }
 
 sub volume_snapshot {
-    my ($class, $scfg, $storeid, $volname, $snap, $running) = @_;
+    my ($class, $scfg, $storeid, $volname, $snap) = @_;
 
-    die "can't snapshot this image format" if $volname !~ m/\.(qcow2|qed)$/;
-
-    return 1 if $running;
+    die "can't snapshot this image format\n" if $volname !~ m/\.(qcow2|qed)$/;
 
     my $path = $class->filesystem_path($scfg, $volname);
 
@@ -665,7 +699,7 @@ sub volume_rollback_is_possible {
 sub volume_snapshot_rollback {
     my ($class, $scfg, $storeid, $volname, $snap) = @_;
 
-    die "can't rollback snapshot this image format" if $volname !~ m/\.(qcow2|qed)$/;
+    die "can't rollback snapshot this image format\n" if $volname !~ m/\.(qcow2|qed)$/;
 
     my $path = $class->filesystem_path($scfg, $volname);
 
@@ -679,11 +713,13 @@ sub volume_snapshot_rollback {
 sub volume_snapshot_delete {
     my ($class, $scfg, $storeid, $volname, $snap, $running) = @_;
 
-    die "can't delete snapshot for this image format" if $volname !~ m/\.(qcow2|qed)$/;
+    die "can't delete snapshot for this image format\n" if $volname !~ m/\.(qcow2|qed)$/;
 
     return 1 if $running;
 
     my $path = $class->filesystem_path($scfg, $volname);
+
+    $class->deactivate_volume($storeid, $scfg, $volname, $snap, {});
 
     my $cmd = ['/usr/bin/qemu-img', 'snapshot','-d', $snap, $path];
 
@@ -698,16 +734,14 @@ sub volume_has_feature {
     my $features = {
 	snapshot => { current => { qcow2 => 1}, snap => { qcow2 => 1} },
 	clone => { base => {qcow2 => 1, raw => 1, vmdk => 1} },
-	template => { current => {qcow2 => 1, raw => 1, vmdk => 1} },
+	template => { current => {qcow2 => 1, raw => 1, vmdk => 1, subvol => 1} },
 	copy => { base => {qcow2 => 1, raw => 1, vmdk => 1},
 		  current => {qcow2 => 1, raw => 1, vmdk => 1},
 		  snap => {qcow2 => 1} },
     };
 
-    my ($vtype, $name, $vmid, $basename, $basevmid, $isBase) =
+    my ($vtype, $name, $vmid, $basename, $basevmid, $isBase, $format) =
 	$class->parse_volname($volname);
-
-    my (undef, $format) = parse_name_dir($name);
 
     my $key = undef;
     if($snapname){
@@ -742,7 +776,7 @@ sub list_images {
 	next if !$vollist && defined($vmid) && ($owner ne $vmid);
 
 	my ($size, $format, $used, $parent) = file_size_info($fn);
-	next if !($format && $size);
+	next if !($format && defined($size));
 
 	my $volid;
 	if ($parent && $parent =~ m!^../(\d+)/([^/]+\.($fmts))$!) {
@@ -810,9 +844,9 @@ sub deactivate_storage {
 }
 
 sub activate_volume {
-    my ($class, $storeid, $scfg, $volname, $exclusive, $cache) = @_;
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
 
-    my $path = $class->filesystem_path($scfg, $volname);
+    my $path = $class->filesystem_path($scfg, $volname, $snapname);
 
     # check is volume exists
     if ($scfg->{path}) {
@@ -823,7 +857,7 @@ sub activate_volume {
 }
 
 sub deactivate_volume {
-    my ($class, $storeid, $scfg, $volname, $cache) = @_;
+    my ($class, $storeid, $scfg, $volname, $snapname, $cache) = @_;
 
     # do nothing by default
 }
