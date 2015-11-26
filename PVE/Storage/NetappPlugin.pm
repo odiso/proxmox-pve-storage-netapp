@@ -124,7 +124,7 @@ sub netapp_list_files {
 	$vols = netapp_list_vols($scfg);
     }
 
-    while( my ($volume) = each $vols) {
+    while( my ($volume) = each %$vols) {
 	$xmlparams .= '<file-list-directory-iter><desired-attributes><file-info><name></name><file-size></file-size></file-info></desired-attributes><max-records>1000</max-records><path>/vol/'.$volume.'</path></file-list-directory-iter>';
     }
 
@@ -135,7 +135,7 @@ sub netapp_list_files {
     if(is_array($xmlresponse->{netapp}->{results})){
 	foreach my $result (@{$xmlresponse->{netapp}->{results}}) {
 
-	    while( my ($filename, $properties) = each $result->{"attributes-list"}->{"file-info"} ) {
+	    while( my ($filename, $properties) = each @{$result->{"attributes-list"}->{"file-info"}} ) {
 
 		if ($filename =~  m/^((vm|base)-(\d+)-disk-(\d+).(\S+))/) {
 		    my ($image, $owner, $format) = ($1, $3, $5);
@@ -152,7 +152,7 @@ sub netapp_list_files {
 	    }
 	}
     }else{
-	while( my ($filename, $properties) = each $xmlresponse->{netapp}->{results}->{"attributes-list"}->{"file-info"}) {
+	while( my ($filename, $properties) = each @{$xmlresponse->{netapp}->{results}->{"attributes-list"}->{"file-info"}}) {
                if ($filename =~  m/^((vm|base)-(\d+)-disk-(\d+).(\S+))/) {
                     my ($image, $owner, $format) = ($1, $3, $5);
 
@@ -536,7 +536,7 @@ sub clone_image {
 
     my $volumeexist = undef;
     my $vols = netapp_list_vols($scfg);
-    while( my ($volume) = each $vols) {
+    while( my ($volume) = each %$vols) {
         if ($volume eq $volumedst){
 	    $volumeexist = 1;
 	    last;
